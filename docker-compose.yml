@@ -3,11 +3,11 @@ services:
   app:
     build:
       context: .
-      target: development
+      target: production
     ports:
       - "3000:3000"
     volumes:
       - ./:/app
       - /app/node_modules
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
