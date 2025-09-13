@@ -35,6 +35,12 @@ app.get('/ci-cd', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+app.get('/he', (req, res) => {
+  res.json({
+    message: 'Hello from Node.js Docker App testing api!',
+    timestamp: new Date().toISOString()
+  });
+});
 
 app.get('/health', (req, res) => {
   res.json({ 
