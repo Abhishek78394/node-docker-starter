@@ -42,8 +42,11 @@ jobs:
           git reset --hard origin/main
           
           # Deploy with Docker
-          docker-compose down
-          docker-compose up -d --build
+          docker compose down || true
+          docker compose build --no-cache
+          docker compose up -d
+
+          docker ps
           
           # Health check
           sleep 10
