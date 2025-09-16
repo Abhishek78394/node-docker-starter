@@ -3,29 +3,22 @@ name: Deploy to EC2
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # Manual trigger option
+  workflow_dispatch:
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
     
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
+    - uses: actions/setup-node@v4
       with:
         node-version: '18'
         cache: 'npm'
     
-    - name: Install dependencies
-      run: npm ci
-    
-    - name: Run tests
-      run: npm test --if-present
-    
-    - name: Run linting
-      run: npm run lint --if-present
+    - run: npm ci
+    - run: npm test --if-present
+    - run: npm run lint --if-present
 
   deploy:
     needs: test
@@ -33,8 +26,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
     
     - name: Deploy to EC2
       uses: appleboy/ssh-action@v1.0.3
@@ -42,76 +34,17 @@ jobs:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USER }}
         key: ${{ secrets.EC2_SSH_KEY }}
-        port: 22
-        timeout: 60s
-        command_timeout: 30m
-        script_stop: true
-        debug: true
         script: |
-          echo "🚀 Starting deployment..."
-          
-          # Check system resources
-          echo "💾 System resources:"
-          free -h
-          df -h /
-          
-          # Navigate to project directory
           cd ${{ secrets.PROJECT_PATH }}
-          echo "📂 Current directory: $(pwd)"
           
-          # Ensure we're on the correct branch and pull latest changes
-          echo "📥 Pulling latest code..."
+          # Pull latest code
           git fetch origin
           git reset --hard origin/main
           
-          # Check Docker status
-          echo "🐳 Checking Docker status..."
-          sudo systemctl status docker --no-pager -l
-          docker --version
-          docker-compose --version
+          # Deploy with Docker
+          docker-compose down
+          docker-compose up -d --build
           
-          # Stop existing containers with timeout
-          echo "🛑 Stopping containers..."
-          timeout 60 docker-compose down --remove-orphans 2>&1 || {
-            echo "⚠️ Docker-compose down failed or timed out"
-            docker ps -a
-            sudo pkill -f docker-compose || true
-          }
-          
-          # Clean up Docker resources more aggressively
-          echo "🧹 Cleaning up Docker resources..."
-          docker container prune -f || true
-          docker image prune -f || true
-          docker network prune -f || true
-          
-          # Build and start containers with better error handling
-          echo "🔨 Building and starting containers..."
-          if timeout 300 docker-compose up -d --build --force-recreate 2>&1; then
-            echo "✅ Containers started successfully"
-          else
-            echo "❌ Docker-compose up failed"
-            echo "🔍 Checking for running processes:"
-            ps aux | grep docker
-            echo "🔍 Checking Docker daemon:"
-            sudo journalctl -u docker.service --no-pager -l --since "5 minutes ago"
-            exit 1
-          fi
-          
-          # Wait for containers to be ready
-          echo "⏳ Waiting for containers to start..."
-          sleep 20
-          
-          # Show container status
-          echo "📊 Container status:"
-          docker-compose ps 2>&1 || docker ps
-          
-          # Basic health check
-          echo "🏥 Performing health check..."
-          if curl -f -m 10 http://localhost:3000 2>/dev/null || curl -f -m 10 http://localhost:80 2>/dev/null; then
-            echo "✅ Deployment successful! Application is responding."
-          else
-            echo "⚠️  Warning: Health check failed, checking logs..."
-            docker-compose logs --tail=20 2>&1 || docker logs $(docker ps -q) 2>&1
-          fi
-          
-          echo "🎉 Deployment process completed!"
+          # Health check
+          sleep 10
+          curl -f http://localhost:3000 || echo "Health check failed"
