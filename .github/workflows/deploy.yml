@@ -1,14 +1,91 @@
-- name: Deploy to server
-  uses: appleboy/ssh-action@v0.1.5
-  with:
-    host: ${{ secrets.HOST }}           # Your EC2 public IP
-    username: ubuntu                    # Default user for Ubuntu AMI
-    key: ${{ secrets.SSH_PRIVATE_KEY }} # Your PEM file content
-    port: 22
-    script: |
-      echo "🚀 Starting deployment..."
-      cd /path/to/your/project
-      git pull origin main
-      docker-compose down || true
-      docker-compose up -d --build
-      docker system prune -f
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # Manual trigger option
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run tests
+      run: npm test --if-present
+    
+    - name: Run linting
+      run: npm run lint --if-present
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Deploy to EC2
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        port: 22
+        timeout: 60s
+        command_timeout: 30m
+        script_stop: true
+        debug: true
+        script: |
+          echo "🚀 Starting deployment..."
+          
+          # Navigate to project directory
+          cd ${{ secrets.PROJECT_PATH }}
+          echo "📂 Current directory: $(pwd)"
+          
+          # Ensure we're on the correct branch and pull latest changes
+          echo "📥 Pulling latest code..."
+          git fetch origin
+          git reset --hard origin/main
+          
+          # Stop existing containers gracefully
+          echo "🛑 Stopping containers..."
+          docker-compose down --remove-orphans || true
+          
+          # Remove old images to free space
+          echo "🧹 Cleaning up old images..."
+          docker image prune -f || true
+          
+          # Build and start new containers
+          echo "🔨 Building and starting containers..."
+          docker-compose up -d --build --force-recreate
+          
+          # Wait for containers to be ready
+          echo "⏳ Waiting for containers to start..."
+          sleep 20
+          
+          # Show container status
+          echo "📊 Container status:"
+          docker-compose ps
+          
+          # Basic health check
+          echo "🏥 Performing health check..."
+          if curl -f -m 10 http://localhost:3000 2>/dev/null || curl -f -m 10 http://localhost:80 2>/dev/null; then
+            echo "✅ Deployment successful! Application is responding."
+          else
+            echo "⚠️  Warning: Health check failed, checking logs..."
+            docker-compose logs --tail=20
+          fi
+          
+          echo "🎉 Deployment process completed!"
