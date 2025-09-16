@@ -50,6 +50,11 @@ jobs:
         script: |
           echo "🚀 Starting deployment..."
           
+          # Check system resources
+          echo "💾 System resources:"
+          free -h
+          df -h /
+          
           # Navigate to project directory
           cd ${{ secrets.PROJECT_PATH }}
           echo "📂 Current directory: $(pwd)"
@@ -59,17 +64,38 @@ jobs:
           git fetch origin
           git reset --hard origin/main
           
-          # Stop existing containers gracefully
+          # Check Docker status
+          echo "🐳 Checking Docker status..."
+          sudo systemctl status docker --no-pager -l
+          docker --version
+          docker-compose --version
+          
+          # Stop existing containers with timeout
           echo "🛑 Stopping containers..."
-          docker-compose down --remove-orphans || true
+          timeout 60 docker-compose down --remove-orphans 2>&1 || {
+            echo "⚠️ Docker-compose down failed or timed out"
+            docker ps -a
+            sudo pkill -f docker-compose || true
+          }
           
-          # Remove old images to free space
-          echo "🧹 Cleaning up old images..."
+          # Clean up Docker resources more aggressively
+          echo "🧹 Cleaning up Docker resources..."
+          docker container prune -f || true
           docker image prune -f || true
+          docker network prune -f || true
           
-          # Build and start new containers
+          # Build and start containers with better error handling
           echo "🔨 Building and starting containers..."
-          docker-compose up -d --build --force-recreate
+          if timeout 300 docker-compose up -d --build --force-recreate 2>&1; then
+            echo "✅ Containers started successfully"
+          else
+            echo "❌ Docker-compose up failed"
+            echo "🔍 Checking for running processes:"
+            ps aux | grep docker
+            echo "🔍 Checking Docker daemon:"
+            sudo journalctl -u docker.service --no-pager -l --since "5 minutes ago"
+            exit 1
+          fi
           
           # Wait for containers to be ready
           echo "⏳ Waiting for containers to start..."
@@ -77,7 +103,7 @@ jobs:
           
           # Show container status
           echo "📊 Container status:"
-          docker-compose ps
+          docker-compose ps 2>&1 || docker ps
           
           # Basic health check
           echo "🏥 Performing health check..."
@@ -85,7 +111,7 @@ jobs:
             echo "✅ Deployment successful! Application is responding."
           else
             echo "⚠️  Warning: Health check failed, checking logs..."
-            docker-compose logs --tail=20
+            docker-compose logs --tail=20 2>&1 || docker logs $(docker ps -q) 2>&1
           fi
           
           echo "🎉 Deployment process completed!"
